@@ -80,10 +80,13 @@ var (
 
 	// ErrOutcomeUnknown means the request may have reached smsapi.bg and
 	// no clear answer came back, so a Send may or may not have gone out: a
-	// transport error or timeout after the request was written, a 5xx
-	// without a code, 201 or 999, or a 2xx that could not be read. A
-	// failure before the request left (a refused connection, a context
-	// cancelled first) is not this. Retry a Send only with Idx and CheckIdx.
+	// transport error that is not clearly from before sending (a timeout,
+	// a dropped connection, an error a custom transport makes up), a 5xx
+	// with no error code at all (neither numeric nor named), 201 or 999, or
+	// a 2xx that could not be read. Only a failure that cannot have reached
+	// smsapi.bg is not this: a refused or failed dial, a DNS failure, a
+	// failed TLS handshake or certificate check, or a context done before
+	// the call. Retry a Send only with Idx and CheckIdx.
 	ErrOutcomeUnknown = errors.New("smsapibg: outcome unknown")
 
 	// ErrUnexpectedResponse means a successful HTTP answer that this

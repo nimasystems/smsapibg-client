@@ -2,11 +2,18 @@ package smsapibg
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -440,6 +447,93 @@ func TestTheOutcomeIsUnknownWhenTheConnectionDropsAfterTheRequest(t *testing.T) 
 	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("Send error = %v, want ErrOutcomeUnknown", err)
+	}
+}
+
+// contextDropper is a transport that does not pass the request's context
+// on, so httptrace hooks never fire: the library cannot see when the
+// request was written.
+type contextDropper struct{}
+
+func (contextDropper) RoundTrip(r *http.Request) (*http.Response, error) {
+	return http.DefaultTransport.RoundTrip(r.WithContext(context.Background()))
+}
+
+func TestTheOutcomeIsUnknownWhenATransportHidesWhetherTheRequestLeft(t *testing.T) {
+	var received atomic.Int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		received.Add(1)
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("Hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}, WithHTTPClient(&http.Client{Transport: contextDropper{}}))
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if received.Load() == 0 {
+		t.Fatal("the server never received the request; the test proves nothing")
+	}
+	if !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("the server got the request and the connection dropped: error = %v, want ErrOutcomeUnknown", err)
+	}
+}
+
+func TestARefusedDialIsKnownNotSentEvenThroughACustomTransport(t *testing.T) {
+	c, err := New(testToken, WithBaseURL("http://127.0.0.1:1"), WithHTTPClient(&http.Client{Transport: contextDropper{}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if err == nil || errors.Is(err, ErrOutcomeUnknown) {
+		t.Errorf("connection refused: error = %v, want an error that is not ErrOutcomeUnknown", err)
+	}
+}
+
+func TestAFailedTLSHandshakeIsKnownNotSent(t *testing.T) {
+	var received atomic.Bool
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received.Store(true) }))
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0) // the refused handshake is the point
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	// The default client does not trust the test server's certificate.
+	c, err := New(testToken, WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if err == nil || errors.Is(err, ErrOutcomeUnknown) || received.Load() {
+		t.Errorf("untrusted certificate: error = %v (received %v), want an error that is not ErrOutcomeUnknown", err, received.Load())
+	}
+}
+
+func TestOnlyErrorsFromBeforeSendingAreKnownNotSent(t *testing.T) {
+	wrap := func(err error) error { return &url.Error{Op: "Post", URL: "https://api.smsapi.bg/sms.do", Err: err} }
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"a dial error", wrap(&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}), true},
+		{"a DNS error", wrap(&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "api.smsapi.bg"}}), true},
+		{"a bare DNS error", wrap(&net.DNSError{Err: "no such host", Name: "api.smsapi.bg"}), true},
+		{"an untrusted certificate", wrap(&tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}), true},
+		{"a failed certificate check of any kind", wrap(&tls.CertificateVerificationError{Err: errors.New("custom verifier said no")}), true},
+		{"a wrong host name", wrap(x509.HostnameError{Host: "api.smsapi.bg"}), true},
+		{"a server that does not speak TLS", wrap(tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}), true},
+		{"a read error", wrap(&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}), false},
+		{"a write error", wrap(&net.OpError{Op: "write", Net: "tcp", Err: errors.New("broken pipe")}), false},
+		{"an EOF", wrap(io.EOF), false},
+		{"a cancelled context", wrap(context.Canceled), false},
+		{"a timeout", wrap(context.DeadlineExceeded), false},
+		{"anything else", wrap(errors.New("something")), false},
+	}
+	for _, tc := range cases {
+		if got := clearlyNotSent(tc.err); got != tc.want {
+			t.Errorf("%s: clearlyNotSent = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

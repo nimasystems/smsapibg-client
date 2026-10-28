@@ -60,7 +60,7 @@ token with whitespace, and an invalid option. Always make a client with
 | Option | Default | Notes |
 |---|---|---|
 | `WithBaseURL(url)` | `https://api.smsapi.bg/` | Must be `https`; plain `http` only on a loopback host, for tests. Must not carry `user:password@`. A path prefix is kept (for a proxy). |
-| `WithHTTPClient(hc)` | a private `*http.Client` with a 15 s timeout (`DefaultTimeout`), TLS 1.2 or later, and no redirects (a 3xx comes back as an `*APIError`; following it would replay the POST) | Used as given. If its `Timeout` is zero, only your context bounds a call. |
+| `WithHTTPClient(hc)` | a private `*http.Client` with a 15 s timeout (`DefaultTimeout`), TLS 1.2 or later, and no redirects (a 3xx comes back as an `*APIError`; following it would replay the POST) | Used as given: if its `Timeout` is zero, only your context bounds a call, and it follows redirects unless you set its `CheckRedirect`. A transport that hides dial, DNS or TLS errors in its own types makes more errors `ErrOutcomeUnknown`. |
 | `WithUserAgent(ua)` | `smsapibg-client-go` (`DefaultUserAgent`) | Name your application so smsapi.bg can tell its traffic apart. |
 
 Every call takes a `context.Context`; cancel it or give it a deadline to
@@ -101,7 +101,7 @@ parameter allows 15 minutes to 72 hours, while the text of error 56 says
 ### Retries without double sends
 
 **Retrying `Send` is safe only with `Idx` and `CheckIdx` set.** A timeout, a
-dropped connection after the request left, a 5xx without a code, error 201
+dropped connection after the request left, a 5xx with no error code, error 201
 or 999, or an unreadable answer leaves it unknown whether the message went
 out: these errors are `errors.Is(err, smsapibg.ErrOutcomeUnknown)`. A retry
 without `CheckIdx` can then send the SMS twice.
@@ -123,9 +123,14 @@ With them:
 
 Which errors to retry, with backoff: `ErrOutcomeUnknown` and `ErrTemporary`
 (only with `CheckIdx`), and transport errors that are not
-`ErrOutcomeUnknown` (the request never left, so a retry is always safe). Do
-not retry `ErrRateLimited` for code 52 (too many messages to one number)
-soon: it only makes it worse.
+`ErrOutcomeUnknown`. A transport error is `ErrOutcomeUnknown` unless it is
+clearly from before sending: a refused or failed dial, a DNS failure, a
+failed TLS handshake or certificate check, or a context that was done
+before the call. Those never reached smsapi.bg, so they can be retried
+without `CheckIdx`. Anything else, including any error a custom transport
+(`WithHTTPClient`) makes up, counts as unknown. Do not retry
+`ErrRateLimited` for code 52 (too many messages to one number) soon: it
+only makes it worse.
 
 ## Errors
 
@@ -140,7 +145,7 @@ soon: it only makes it worse.
 | `ErrBlocked` | The recipient is blacklisted (57) or opted out (59). Do not retry. | `errors.Is` |
 | `ErrTemporary` | A retry may succeed (8, 200, 201, 202, 203, 999, or HTTP 429 or 5xx without a code). Same as `apiErr.Temporary()`. It does not say a retry is safe: see [Retries](#retries-without-double-sends). | `errors.Is` |
 | `*ValidationError` | A message refused locally; names the parameter (`Field`) and the rule, never the value. | `errors.As` |
-| `ErrOutcomeUnknown` | The request may have reached smsapi.bg and no clear answer came back: a transport error or timeout after the request left, a 5xx without a code, 201, 999, or an unreadable 2xx. A `Send` may or may not have gone out; see [Retries](#retries-without-double-sends). | `errors.Is` |
+| `ErrOutcomeUnknown` | The request may have reached smsapi.bg and no clear answer came back: a transport error that is not clearly from before sending (a timeout, a dropped connection), a 5xx with no error code (numeric or named), 201, 999, or an unreadable 2xx. A `Send` may or may not have gone out; see [Retries](#retries-without-double-sends). | `errors.Is` |
 | `ErrUnexpectedResponse` | A 2xx answer that could not be read (also `ErrOutcomeUnknown`). | `errors.Is` |
 | `ErrMalformedReport` | A delivery callback with missing or misaligned parameters. | `errors.Is` |
 

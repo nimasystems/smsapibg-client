@@ -92,7 +92,7 @@ type Result struct {
 //
 // Retrying Send is safe only with Idx and CheckIdx set. Without them, a
 // retry after an error that is ErrOutcomeUnknown (a timeout or a dropped
-// connection after the request left, a 5xx without a code, 201, 999, an
+// connection after the request left, a 5xx with no error code, 201, 999, an
 // unreadable answer) can send the message twice. With them, a retry of a
 // message that did go through fails with ErrDuplicateIdx: treat that as
 // sent. The first attempt's message ID is then lost, so match its delivery

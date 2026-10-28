@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,7 +103,14 @@ func WithBaseURL(raw string) Option {
 
 // WithHTTPClient makes the client send through hc, for a caller that wants
 // its own transport, proxy or instrumentation. hc is used as given: if its
-// Timeout is zero, only the request context bounds a call.
+// Timeout is zero, only the request context bounds a call, and it follows
+// redirects unless its CheckRedirect says otherwise (the default client
+// refuses them, because following one replays the POST).
+//
+// A transport error counts as ErrOutcomeUnknown unless it is clearly from
+// before sending (dial, DNS, TLS handshake or certificate, see
+// ErrOutcomeUnknown). A transport that wraps those errors in its own types,
+// or reports them differently, makes more errors "unknown": the safe side.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) error {
 		if hc == nil {
@@ -240,16 +248,22 @@ func (c *Client) call(ctx context.Context, method, path string, form url.Values,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 
-	// sent turns true once the request headers are on the wire: from then
-	// on smsapi.bg may act on the request even if no answer comes back.
-	var sent atomic.Bool
+	// A context already done means the request never leaves.
+	if err := ctx.Err(); err != nil {
+		return &transportError{op: path + " request not sent", err: err}
+	}
+	// wrote turns true once the request headers are on the wire. It is only
+	// ever a signal toward "unknown": a transport that drops the request
+	// context never fires it, so its silence proves nothing.
+	var wrote atomic.Bool
 	req = req.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
-		WroteHeaders: func() { sent.Store(true) },
+		WroteHeaders: func() { wrote.Store(true) },
 	}))
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return &transportError{op: path + " request failed", err: err, sent: sent.Load()}
+		sent := wrote.Load() || !clearlyNotSent(err)
+		return &transportError{op: path + " request failed", err: err, sent: sent}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
@@ -283,6 +297,31 @@ func (e *transportError) Error() string { return "smsapibg: " + e.op + ": " + e.
 func (e *transportError) Unwrap() error { return e.err }
 func (e *transportError) Is(target error) bool {
 	return target == ErrOutcomeUnknown && e.sent
+}
+
+// clearlyNotSent reports whether a transport error can only have happened
+// before any of the request reached smsapi.bg: the connection was never
+// made (dial, DNS) or never became a trusted TLS session. Every other
+// error, including ones a custom transport invents, may come after the
+// request was sent, so the outcome is unknown.
+func clearlyNotSent(err error) bool {
+	var dns *net.DNSError
+	var op *net.OpError
+	var verify *tls.CertificateVerificationError
+	var record tls.RecordHeaderError
+	var authority x509.UnknownAuthorityError
+	var host x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	switch {
+	case errors.As(err, &dns):
+		return true
+	case errors.As(err, &op) && op.Op == "dial":
+		return true
+	case errors.As(err, &verify), errors.As(err, &record),
+		errors.As(err, &authority), errors.As(err, &host), errors.As(err, &invalid):
+		return true
+	}
+	return false
 }
 
 // unexpectedError is a 2xx answer that could not be read. The request was
