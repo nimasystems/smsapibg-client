@@ -1,5 +1,6 @@
 GO           ?= go
 STATICCHECK  ?= honnef.co/go/tools/cmd/staticcheck@v0.8.2
+GOVULNCHECK  ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
 MIN_COVERAGE ?= 90
 
 .DEFAULT_GOAL := check
@@ -9,7 +10,7 @@ help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
 
 .PHONY: check
-check: fmt vet lint test cover ## Run everything CI runs (fmt, vet, staticcheck, race tests, coverage floor)
+check: fmt vet lint vuln test cover ## Run everything CI runs (fmt, vet, staticcheck, govulncheck, race tests, coverage floor)
 
 .PHONY: test
 test: ## Run the tests with the race detector
@@ -37,3 +38,7 @@ cover: ## Run the tests with coverage and fail below MIN_COVERAGE percent
 .PHONY: lint
 lint: ## Run staticcheck (fetched by go run; needs network the first time)
 	$(GO) run $(STATICCHECK) ./...
+
+.PHONY: vuln
+vuln: ## Run govulncheck against the code and the Go standard library in use
+	$(GO) run $(GOVULNCHECK) ./...

@@ -1,3 +1,3 @@
 module github.com/nimasystems/smsapibg-client
 
-go 1.26
+go 1.24

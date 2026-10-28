@@ -5,9 +5,13 @@ library does; this file says how to change it.
 
 ## The gate
 
-- `make check` is the gate: gofmt, `go vet`, staticcheck, `go test -race`
-  and a 90% coverage floor (`make cover`). CI (`.github/workflows/ci.yml`)
-  runs the same targets on Go 1.26. Run `make check` before you push. A red
+- `make check` is the gate: gofmt, `go vet`, staticcheck, govulncheck,
+  `go test -race` and a 90% coverage floor (`make cover`). CI
+  (`.github/workflows/ci.yml`) runs the tests on the oldest supported Go
+  (the `go` directive in `go.mod`, 1.24) and on the latest stable, and the
+  rest on the latest stable.
+- Keep the `go` directive at the oldest release the code and tests need, and
+  the README's stated minimum and the CI matrix equal to it. Run `make check` before you push. A red
   gate is never merged.
 - Never weaken the gate to make a change pass: no lowering the coverage
   floor, no skipping a check, no `//nolint`-style escapes. Fix the change.
