@@ -60,3 +60,32 @@ func ExampleClient_Send() {
 	}
 	// Output: 17000000000000001 359888123456 QUEUE
 }
+
+// Receive delivery reports. The handler is yours; it stores the reports,
+// then answers "OK" so smsapi.bg stops resending them.
+func ExampleParseDeliveryReport() {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reports, err := smsapibg.ParseDeliveryReport(r.URL.Query())
+		if err != nil {
+			http.Error(w, "bad report", http.StatusBadRequest)
+			return
+		}
+		for _, rep := range reports {
+			// Store rep, keyed by rep.MessageID; a repeat is a no-op.
+			fmt.Println(rep.MessageID, rep.Idx, rep.Status, rep.Status.Final(), rep.Status.Delivered())
+		}
+		fmt.Fprint(w, "OK")
+	})
+
+	// What smsapi.bg sends: one GET, two reports, comma-separated.
+	req := httptest.NewRequest(http.MethodGet,
+		"/sms/dlr?MsgId=17000000000000001,17000000000000002&status=404,410"+
+			"&status_name=DELIVERED,ACCEPTED&idx=verify-42,verify-43&donedate=1761652900,1761652901&to=359888123456,359888654321", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	fmt.Println(rec.Body.String())
+	// Output:
+	// 17000000000000001 verify-42 DELIVERED true true
+	// 17000000000000002 verify-43 ACCEPTED false false
+	// OK
+}
