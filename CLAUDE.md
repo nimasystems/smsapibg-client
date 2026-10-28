@@ -11,8 +11,8 @@ library does; this file says how to change it.
   (the `go` directive in `go.mod`, 1.24) and on the latest stable, and the
   rest on the latest stable.
 - Keep the `go` directive at the oldest release the code and tests need, and
-  the README's stated minimum and the CI matrix equal to it. Run `make check` before you push. A red
-  gate is never merged.
+  the README's stated minimum and the CI matrix equal to it.
+- Run `make check` before you push. A red gate is never merged.
 - Never weaken the gate to make a change pass: no lowering the coverage
   floor, no skipping a check, no `//nolint`-style escapes. Fix the change.
 - Every Makefile target has a `## description` (`make help` lists them).
@@ -95,6 +95,8 @@ library does; this file says how to change it.
 - Conventional Commits: `type(scope)!: lowercase description`, at most
   100 characters (`feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`).
   Branches are `<type>/<description>`. Pull requests are squash-merged, so
-  the title becomes the commit.
+  the title becomes the commit. Dependabot titles its pull requests
+  "ci: Bump ..." / "chore(deps): Bump ..."; lowercase the title when you
+  squash.
 - Never commit a token, a `.env` file or a captured response that contains
   real phone numbers.

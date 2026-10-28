@@ -130,3 +130,15 @@ func TestProfileTimesOutOnASlowServer(t *testing.T) {
 		t.Fatalf("Profile error = %v, want a timeout", err)
 	}
 }
+
+func TestAnEmptyBalanceIsAnErrorNotZero(t *testing.T) {
+	// A balance read as 0 would fire a false low-balance alert.
+	for _, body := range []string{`{"points":""}`, `{"points":"n/a"}`} {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(body))
+		})
+		if p, err := c.Profile(t.Context()); !errors.Is(err, ErrUnexpectedResponse) {
+			t.Errorf("body %s: Profile = %+v, %v; want ErrUnexpectedResponse", body, p, err)
+		}
+	}
+}

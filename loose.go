@@ -54,11 +54,13 @@ func (s *looseString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// unquote strips the quotes of a JSON string and maps null and "" to "0",
-// so the numeric types read "1.5", 1.5, null and "" alike.
+// unquote strips the quotes of a JSON string and maps null to "0", so the
+// numeric types read "1.5", 1.5 and null alike. An empty string stays an
+// error here: a required number (the balance) must not read as 0. The soft
+// types, for optional fields, turn it into 0 themselves.
 func unquote(b []byte) []byte {
 	b = bytes.TrimSpace(b)
-	if string(b) == "null" || string(b) == `""` {
+	if string(b) == "null" {
 		return []byte("0")
 	}
 	if len(b) >= 2 && b[0] == '"' && b[len(b)-1] == '"' {
