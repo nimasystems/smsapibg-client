@@ -9,7 +9,7 @@ help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
 
 .PHONY: check
-check: fmt vet test cover ## Run everything CI runs (fmt, vet, race tests, coverage floor)
+check: fmt vet lint test cover ## Run everything CI runs (fmt, vet, staticcheck, race tests, coverage floor)
 
 .PHONY: test
 test: ## Run the tests with the race detector

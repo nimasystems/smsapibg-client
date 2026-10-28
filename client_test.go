@@ -3,6 +3,7 @@ package smsapibg
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -241,5 +242,25 @@ func TestTheDefaultUserAgentNamesThisLibrary(t *testing.T) {
 	}
 	if ua != DefaultUserAgent {
 		t.Errorf("User-Agent = %q, want %q", ua, DefaultUserAgent)
+	}
+}
+
+func TestATokenEncodedAsJSONIsRedacted(t *testing.T) {
+	c, err := New(testToken)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	out, err := json.Marshal(struct{ Token any }{c.token})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(out), testToken) || !strings.Contains(string(out), "redacted") {
+		t.Errorf("JSON of the token = %s, want it redacted", out)
+	}
+}
+
+func TestAZeroClientPrintsWithoutPanicking(t *testing.T) {
+	if got := (Client{}).String(); got != "smsapibg.Client{}" {
+		t.Errorf("String() = %q, want smsapibg.Client{}", got)
 	}
 }
