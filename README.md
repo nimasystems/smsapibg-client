@@ -98,14 +98,32 @@ parameter allows 15 minutes to 72 hours, while the text of error 56 says
 
 ### Retries without double sends
 
-A timeout or a dropped connection leaves it unknown whether the message was
-sent. To make a retry safe, give every message an `Idx` (a verification
-attempt ID, say) and set `CheckIdx`. If the first attempt did go through,
-the retry fails with `CodeDuplicateIdx` (53) instead of sending a second SMS.
+**Retrying `Send` is safe only with `Idx` and `CheckIdx` set.** A timeout, a
+dropped connection after the request left, a 5xx without a code, error 201
+or 999, or an unreadable answer leaves it unknown whether the message went
+out: these errors are `errors.Is(err, smsapibg.ErrOutcomeUnknown)`. A retry
+without `CheckIdx` can then send the SMS twice.
 
-Retry only errors where `errors.Is(err, smsapibg.ErrTemporary)` is true, or
-transport errors, with backoff. Do not retry `ErrRateLimited` for code 52
-(too many messages to one number) soon: it only makes it worse.
+With them:
+
+- Give every message an `Idx` (a verification attempt ID, say) and set
+  `CheckIdx`. If the first attempt did go through, the retry fails with
+  `ErrDuplicateIdx` (53) instead of sending a second SMS. **Treat
+  `ErrDuplicateIdx` as sent.**
+- The first attempt's message ID is lost then (53 does not return it), so
+  match delivery reports on `Idx`, not on `Result.ID`.
+- smsapi.bg remembers an `Idx` for 24 hours. Stop retrying well inside that
+  (minutes, not hours), or a late retry sends again.
+- A new message needs a new `Idx`. When a user asks to resend a code, that
+  is a new attempt: reusing the old `Idx` would block it with 53 for 24 h.
+- Whether smsapi.bg applies `check_idx` to `Test: true` messages is not
+  documented, so do not rely on test mode to try this out.
+
+Which errors to retry, with backoff: `ErrOutcomeUnknown` and `ErrTemporary`
+(only with `CheckIdx`), and transport errors that are not
+`ErrOutcomeUnknown` (the request never left, so a retry is always safe). Do
+not retry `ErrRateLimited` for code 52 (too many messages to one number)
+soon: it only makes it worse.
 
 ## Errors
 
@@ -118,9 +136,10 @@ transport errors, with backoff. Do not retry `ErrRateLimited` for code 52
 | `ErrDuplicateIdx` | A message with this `Idx` was already accepted in the last 24 h (53, with `CheckIdx`): treat it as sent. | `errors.Is` |
 | `ErrRateLimited` | Too many requests overall (202, 203, HTTP 429) or to one number (52). | `errors.Is` |
 | `ErrBlocked` | The recipient is blacklisted (57) or opted out (59). Do not retry. | `errors.Is` |
-| `ErrTemporary` | A retry may succeed (8, 200, 201, 202, 203, 999, or HTTP 429 or 5xx without a code). Same as `apiErr.Temporary()`. | `errors.Is` |
+| `ErrTemporary` | A retry may succeed (8, 200, 201, 202, 203, 999, or HTTP 429 or 5xx without a code). Same as `apiErr.Temporary()`. It does not say a retry is safe: see [Retries](#retries-without-double-sends). | `errors.Is` |
 | `*ValidationError` | A message refused locally; names the parameter (`Field`) and the rule, never the value. | `errors.As` |
-| `ErrUnexpectedResponse` | A 2xx answer that could not be read. On `Send`, the message may have been accepted. | `errors.Is` |
+| `ErrOutcomeUnknown` | The request may have reached smsapi.bg and no clear answer came back: a transport error or timeout after the request left, a 5xx without a code, 201, 999, or an unreadable 2xx. A `Send` may or may not have gone out; see [Retries](#retries-without-double-sends). | `errors.Is` |
+| `ErrUnexpectedResponse` | A 2xx answer that could not be read (also `ErrOutcomeUnknown`). | `errors.Is` |
 | `ErrMalformedReport` | A delivery callback with missing or misaligned parameters. | `errors.Is` |
 
 The `sms.do` and authorization error codes have named constants

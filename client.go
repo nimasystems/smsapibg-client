@@ -11,8 +11,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -214,14 +217,21 @@ func (c *Client) call(ctx context.Context, method, path string, form url.Values,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 
+	// sent turns true once the request headers are on the wire: from then
+	// on smsapi.bg may act on the request even if no answer comes back.
+	var sent atomic.Bool
+	req = req.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		WroteHeaders: func() { sent.Store(true) },
+	}))
+
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("smsapibg: %s request failed: %w", path, err)
+		return &transportError{op: path + " request failed", err: err, sent: sent.Load()}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
-		return fmt.Errorf("smsapibg: read %s response: %w", path, err)
+		return &transportError{op: "read " + path + " response", err: err, sent: true}
 	}
 
 	if apiErr := decodeAPIError(raw, resp.StatusCode); apiErr != nil {
@@ -232,9 +242,53 @@ func (c *Client) call(ctx context.Context, method, path string, form url.Values,
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrUnexpectedResponse, path, err)
+		return &unexpectedError{path: path, reason: describeDecodeError(err)}
 	}
 	return nil
+}
+
+// transportError is a request that got no HTTP answer. It unwraps to the
+// cause (so context.Canceled and timeouts match errors.Is), and it is
+// ErrOutcomeUnknown when the request had already been sent.
+type transportError struct {
+	op   string
+	err  error
+	sent bool
+}
+
+func (e *transportError) Error() string { return "smsapibg: " + e.op + ": " + e.err.Error() }
+func (e *transportError) Unwrap() error { return e.err }
+func (e *transportError) Is(target error) bool {
+	return target == ErrOutcomeUnknown && e.sent
+}
+
+// unexpectedError is a 2xx answer that could not be read. The request was
+// answered, so smsapi.bg may well have acted on it: it is also
+// ErrOutcomeUnknown.
+type unexpectedError struct {
+	path, reason string
+}
+
+func (e *unexpectedError) Error() string {
+	return "smsapibg: unexpected response: " + e.path + ": " + e.reason
+}
+func (e *unexpectedError) Is(target error) bool {
+	return target == ErrUnexpectedResponse || target == ErrOutcomeUnknown
+}
+
+// describeDecodeError says where a body failed to decode without quoting
+// any of it: decoder errors can carry values from the body.
+func describeDecodeError(err error) string {
+	var syntax *json.SyntaxError
+	var typ *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntax):
+		return "invalid JSON at byte " + strconv.FormatInt(syntax.Offset, 10)
+	case errors.As(err, &typ) && typ.Field != "":
+		return "field " + typ.Field + " has the wrong type"
+	default:
+		return "the answer is not the expected JSON"
+	}
 }
 
 // decodeAPIError returns the error a body describes, or nil if it describes

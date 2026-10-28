@@ -69,11 +69,22 @@ var (
 	ErrBlocked = errors.New("smsapibg: recipient blocked")
 	// ErrTemporary means a later retry may succeed (8, 200, 201, 202, 203,
 	// 999, or an HTTP 429 or 5xx without a code). See [APIError.Temporary].
+	// It does not mean a retry is safe: some of these are also
+	// ErrOutcomeUnknown, and retrying Send is safe only with Idx and
+	// CheckIdx set.
 	ErrTemporary = errors.New("smsapibg: temporary failure")
 	// ErrDuplicateIdx means a message with this Idx was already accepted in
 	// the last 24 h (53, with CheckIdx): treat it as sent. On a retry it is
 	// the answer that proves the first attempt went through.
 	ErrDuplicateIdx = errors.New("smsapibg: duplicate idx")
+
+	// ErrOutcomeUnknown means the request may have reached smsapi.bg and
+	// no clear answer came back, so a Send may or may not have gone out: a
+	// transport error or timeout after the request was written, a 5xx
+	// without a code, 201 or 999, or a 2xx that could not be read. A
+	// failure before the request left (a refused connection, a context
+	// cancelled first) is not this. Retry a Send only with Idx and CheckIdx.
+	ErrOutcomeUnknown = errors.New("smsapibg: outcome unknown")
 
 	// ErrUnexpectedResponse means a successful HTTP answer that this
 	// library could not read. On Send the message may have been accepted.
@@ -154,6 +165,13 @@ func (e *APIError) Is(target error) bool {
 		return e.Code == CodeBlacklisted || e.Code == CodeOptedOut
 	case ErrTemporary:
 		return e.Temporary()
+	case ErrOutcomeUnknown:
+		switch e.Code {
+		case CodeInternalError, CodeSystemError:
+			return true
+		case 0:
+			return e.Name == "" && e.HTTPStatus >= 500
+		}
 	}
 	return false
 }

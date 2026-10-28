@@ -175,3 +175,27 @@ func TestALocalValidationErrorOnTheNumberIsAnInvalidNumberError(t *testing.T) {
 		t.Error("a bad 'message' is ErrInvalidNumber")
 	}
 }
+
+func TestTheOutcomeIsUnknownOnlyWhenSmsapiMayHaveAcceptedTheMessage(t *testing.T) {
+	cases := []struct {
+		err  *APIError
+		want bool
+	}{
+		{&APIError{Code: CodeInternalError}, true},
+		{&APIError{Code: CodeSystemError}, true},
+		{&APIError{HTTPStatus: http.StatusBadGateway}, true},
+		{&APIError{HTTPStatus: http.StatusGatewayTimeout}, true},
+		{&APIError{HTTPStatus: http.StatusInternalServerError}, true},
+		{&APIError{Code: CodeTooManySimultaneous}, false}, // "the message won't be sent"
+		{&APIError{Code: CodeInsufficientCredits, HTTPStatus: http.StatusServiceUnavailable}, false},
+		{&APIError{Code: CodeNoValidNumbers}, false},
+		{&APIError{HTTPStatus: http.StatusTooManyRequests}, false},
+		{&APIError{HTTPStatus: http.StatusBadRequest}, false},
+		{&APIError{Name: "authorization_failed", HTTPStatus: http.StatusInternalServerError}, false},
+	}
+	for _, tc := range cases {
+		if got := errors.Is(tc.err, ErrOutcomeUnknown); got != tc.want {
+			t.Errorf("%+v: errors.Is(ErrOutcomeUnknown) = %v, want %v", *tc.err, got, tc.want)
+		}
+	}
+}

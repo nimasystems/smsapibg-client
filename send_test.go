@@ -410,6 +410,78 @@ func TestASendTimesOutOnASlowServer(t *testing.T) {
 	}
 }
 
+func TestTheOutcomeIsUnknownWhenTheRequestReachedTheServerAndNoAnswerCame(t *testing.T) {
+	arrived := make(chan struct{})
+	c := newHangingClient(t, arrived)
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() { <-arrived; cancel() }()
+	_, err := c.Send(ctx, Message{To: "359888123456", Text: "hi"})
+	if !errors.Is(err, ErrOutcomeUnknown) {
+		t.Errorf("cancelled after the request was sent: error = %v, want ErrOutcomeUnknown", err)
+	}
+
+	c = newHangingClient(t, nil, WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
+	_, err = c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if !errors.Is(err, ErrOutcomeUnknown) {
+		t.Errorf("timed out waiting for the answer: error = %v, want ErrOutcomeUnknown", err)
+	}
+}
+
+func TestTheOutcomeIsUnknownWhenTheConnectionDropsAfterTheRequest(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("Hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	})
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("Send error = %v, want ErrOutcomeUnknown", err)
+	}
+}
+
+func TestTheOutcomeIsKnownWhenTheRequestNeverLeft(t *testing.T) {
+	// Nothing listens on port 1: the connection is refused before a byte is sent.
+	c, err := New(testToken, WithBaseURL("http://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if err == nil || errors.Is(err, ErrOutcomeUnknown) {
+		t.Errorf("connection refused: error = %v, want an error that is not ErrOutcomeUnknown", err)
+	}
+
+	called := false
+	c = newTestClient(t, func(w http.ResponseWriter, r *http.Request) { called = true })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = c.Send(ctx, Message{To: "359888123456", Text: "hi"})
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrOutcomeUnknown) || called {
+		t.Errorf("cancelled before sending: error = %v (called %v), want context.Canceled and not ErrOutcomeUnknown", err, called)
+	}
+}
+
+func TestAnUnreadableAnswerToASendIsAnUnknownOutcome(t *testing.T) {
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusOK, "OK:1460969715572091219:0.16"))
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if !errors.Is(err, ErrUnexpectedResponse) || !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("Send error = %v, want ErrUnexpectedResponse and ErrOutcomeUnknown", err)
+	}
+}
+
+func TestA5xxWithoutACodeIsAnUnknownOutcome(t *testing.T) {
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusBadGateway, "<html>Bad Gateway</html>"))
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if !errors.Is(err, ErrOutcomeUnknown) || !errors.Is(err, ErrTemporary) {
+		t.Fatalf("Send error = %v, want ErrOutcomeUnknown and ErrTemporary", err)
+	}
+}
+
 func TestASendHonoursAContextDeadline(t *testing.T) {
 	c := newHangingClient(t, nil)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)

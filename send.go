@@ -2,7 +2,6 @@ package smsapibg
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -91,8 +90,16 @@ type Result struct {
 // Send sends m (POST /sms.do). It checks m first and returns a
 // *ValidationError, without calling the API, if a rule is broken.
 //
-// A transport error or a timeout leaves it unknown whether the message was
-// sent; set Idx and CheckIdx to make a retry safe.
+// Retrying Send is safe only with Idx and CheckIdx set. Without them, a
+// retry after an error that is ErrOutcomeUnknown (a timeout or a dropped
+// connection after the request left, a 5xx without a code, 201, 999, an
+// unreadable answer) can send the message twice. With them, a retry of a
+// message that did go through fails with ErrDuplicateIdx: treat that as
+// sent. The first attempt's message ID is then lost, so match its delivery
+// reports on Idx. Stop retrying well inside the 24 h that check_idx
+// remembers an Idx, and give a new message (a user's "resend code") a new
+// Idx. Whether smsapi.bg applies check_idx to Test messages is not
+// documented.
 func (c *Client) Send(ctx context.Context, m Message) (Result, error) {
 	form, err := m.form(c.now())
 	if err != nil {
@@ -115,7 +122,7 @@ func (c *Client) Send(ctx context.Context, m Message) (Result, error) {
 		return Result{}, err
 	}
 	if len(body.List) == 0 {
-		return Result{}, fmt.Errorf("%w: %s: no message in the answer", ErrUnexpectedResponse, sendPath)
+		return Result{}, &unexpectedError{path: sendPath, reason: "no message in the answer"}
 	}
 	it := body.List[0]
 	res := Result{
