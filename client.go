@@ -82,7 +82,9 @@ func New(token string, opts ...Option) (*Client, error) {
 }
 
 // WithBaseURL points the client at another API root, such as a proxy or an
-// httptest server. It must be https, or http on a loopback host.
+// httptest server. It must be https, or http on a loopback host, and must not
+// carry userinfo (user:password@), which could leak through logs. Its errors
+// never echo the URL.
 func WithBaseURL(raw string) Option {
 	return func(c *Client) error {
 		u, err := parseBaseURL(raw)
@@ -124,7 +126,7 @@ func (c Client) String() string {
 	if c.baseURL == nil {
 		return "smsapibg.Client{}"
 	}
-	return "smsapibg.Client{" + c.baseURL.String() + "}"
+	return "smsapibg.Client{" + c.baseURL.Redacted() + "}"
 }
 
 // GoString keeps the token out of %#v.
@@ -149,6 +151,9 @@ func parseBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return nil, errors.New("smsapibg: the base URL must be an absolute URL")
+	}
+	if u.User != nil {
+		return nil, errors.New("smsapibg: the base URL must not carry credentials (userinfo); the token is the only credential")
 	}
 	switch {
 	case u.Scheme == "https":

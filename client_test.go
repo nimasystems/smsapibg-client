@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,40 @@ func TestNewRefusesABaseURLThatIsNotHTTPS(t *testing.T) {
 	for _, raw := range []string{"http://api.smsapi.bg/", "ftp://api.smsapi.bg/", "api.smsapi.bg", "https://", "::"} {
 		if _, err := New(testToken, WithBaseURL(raw)); err == nil {
 			t.Errorf("WithBaseURL(%q) accepted, want an error", raw)
+		}
+	}
+}
+
+func TestABaseURLWithCredentialsIsRefused(t *testing.T) {
+	for _, raw := range []string{
+		"https://alice:hunter2@proxy.example.com/",
+		"https://alice@proxy.example.com/",
+		"http://alice:hunter2@127.0.0.1:8080/",
+	} {
+		_, err := New(testToken, WithBaseURL(raw))
+		if err == nil {
+			t.Errorf("WithBaseURL with userinfo accepted, want an error")
+			continue
+		}
+		for _, leak := range []string{"alice", "hunter2", "proxy.example.com", "127.0.0.1"} {
+			if strings.Contains(err.Error(), leak) {
+				t.Errorf("WithBaseURL error %q echoes the URL (%q)", err, leak)
+			}
+		}
+	}
+}
+
+func TestStringNeverPrintsUserinfoOfTheBaseURL(t *testing.T) {
+	c, err := New(testToken)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// WithBaseURL refuses userinfo; String must hold even if a URL with it
+	// ever got in, so set one directly.
+	c.baseURL.User = url.UserPassword("user", "hunter2")
+	for _, out := range []string{c.String(), fmt.Sprintf("%v", c), fmt.Sprintf("%+v", *c), fmt.Sprintf("%#v", c)} {
+		if strings.Contains(out, "hunter2") {
+			t.Errorf("printed client %q contains the base URL password", out)
 		}
 	}
 }
