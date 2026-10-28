@@ -50,8 +50,15 @@ func (s DeliveryStatus) String() string {
 }
 
 // Final reports whether no further report should be expected for the
-// message: it was delivered, or it will not be. SENT, QUEUE and ACCEPTED
-// are on the way; an unknown code is not treated as final.
+// message: it was delivered, or it will not be. QUEUE and ACCEPTED are on
+// the way; an unknown code is not treated as final.
+//
+// SENT (403, "sent without a final delivery report") is not final either.
+// On a network that returns delivery reports, DELIVERED or UNDELIVERED
+// follows it, and calling SENT final would drop that outcome. On a network
+// that does not, nothing follows: so do not wait for Final alone; give up
+// after a deadline of your own (ExpiresAt plus a margin, say) and treat a
+// last SENT as "probably delivered".
 func (s DeliveryStatus) Final() bool {
 	switch s {
 	case StatusNotFound, StatusExpired, StatusDelivered, StatusUndelivered,

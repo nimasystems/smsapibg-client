@@ -530,3 +530,88 @@ func TestASendValidationErrorNeverContainsTheNumberOrText(t *testing.T) {
 		t.Errorf("Send error = %v, want one without the text or sender", err)
 	}
 }
+
+func TestASuccessWithoutAMessageIDIsAnUnexpectedResponse(t *testing.T) {
+	for _, body := range []string{
+		`{"count":1,"list":[{"points":0.16,"number":"359888123456","status":"QUEUE"}]}`,
+		`{"count":1,"list":[{"id":"","points":0.16,"number":"359888123456","status":"QUEUE"}]}`,
+	} {
+		var got capture
+		c := newTestClient(t, serve(t, &got, http.StatusOK, body))
+		if _, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"}); !errors.Is(err, ErrUnexpectedResponse) {
+			t.Errorf("body %s: Send error = %v, want ErrUnexpectedResponse", body, err)
+		}
+	}
+}
+
+func TestOddOptionalFieldsDoNotTurnASentMessageIntoAnError(t *testing.T) {
+	var got capture
+	body := `{"count":1,"list":[{"id":"1","points":"","number":359888123456,"date_sent":1460969712.0,` +
+		`"status":null,"parts":""}],"parts":"n/a","length":{}}`
+	c := newTestClient(t, serve(t, &got, http.StatusOK, body))
+	res, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi", Details: true})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	want := Result{ID: "1", Number: "359888123456", SentAt: time.Unix(1460969712, 0)}
+	if res != want {
+		t.Errorf("Result = %+v\nwant     %+v", res, want)
+	}
+}
+
+func TestAnUnreadableAnswerNeverQuotesTheBody(t *testing.T) {
+	for _, body := range []string{
+		`{"count":1,"list":[{"id":{"secretvalue":1}}]}`,
+		`{"count":1,"list":"secretvalue"}`,
+	} {
+		var got capture
+		c := newTestClient(t, serve(t, &got, http.StatusOK, body))
+		_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+		if !errors.Is(err, ErrUnexpectedResponse) || strings.Contains(err.Error(), "secretvalue") {
+			t.Errorf("body %s: Send error = %v, want ErrUnexpectedResponse without the body", body, err)
+		}
+	}
+	// A strict field whose parse error would quote the value.
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"points":"secretvalue"}`))
+	})
+	if _, err := c.Profile(t.Context()); !errors.Is(err, ErrUnexpectedResponse) || strings.Contains(err.Error(), "secretvalue") {
+		t.Errorf("Profile error = %v, want ErrUnexpectedResponse without the body", err)
+	}
+}
+
+func TestAZeroClientReturnsAnErrorInsteadOfPanicking(t *testing.T) {
+	var zero Client
+	if _, err := zero.Send(t.Context(), Message{To: "359888123456", Text: "hi"}); err == nil {
+		t.Error("Send on a zero Client succeeded, want an error")
+	}
+	if _, err := zero.Profile(t.Context()); err == nil {
+		t.Error("Profile on a zero Client succeeded, want an error")
+	}
+	var nilClient *Client
+	if _, err := nilClient.Send(t.Context(), Message{To: "359888123456", Text: "hi"}); err == nil {
+		t.Error("Send on a nil *Client succeeded, want an error")
+	}
+}
+
+func TestTheDefaultClientDoesNotFollowRedirects(t *testing.T) {
+	followed := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sms.do", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/elsewhere", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/elsewhere", func(w http.ResponseWriter, r *http.Request) {
+		followed = true
+		_, _ = w.Write([]byte(queuedBody))
+	})
+	c := newTestClient(t, mux.ServeHTTP)
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi"})
+	if followed {
+		t.Error("the client followed a redirect and replayed the request")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.HTTPStatus != http.StatusTemporaryRedirect {
+		t.Errorf("Send error = %v, want an *APIError with HTTP 307", err)
+	}
+}

@@ -39,7 +39,8 @@ const (
 )
 
 // Client talks to the smsapi.bg API with one token. It is safe for
-// concurrent use and holds no mutable state after [New] returns.
+// concurrent use and holds no mutable state after [New] returns. Make it
+// with New: the methods of a zero Client return an error.
 type Client struct {
 	token     *secret // a pointer: fmt prints a nested pointer as an address, never its target
 	baseURL   *url.URL
@@ -186,10 +187,29 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// defaultHTTPClient does not follow redirects: the API never redirects, and
+// following one would replay a POST, possibly with the Authorization header.
+// A redirect comes back as an *APIError with its 3xx status.
 func defaultHTTPClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	return &http.Client{Timeout: DefaultTimeout, Transport: tr}
+	return &http.Client{
+		Timeout:       DefaultTimeout,
+		Transport:     tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// errNotBuilt is what a method returns on a Client that New did not make.
+var errNotBuilt = errors.New("smsapibg: the Client was not made with New")
+
+// ready reports whether c was made by New, so a zero or nil Client returns
+// an error instead of panicking.
+func (c *Client) ready() error {
+	if c == nil || c.token == nil || c.baseURL == nil || c.http == nil || c.now == nil {
+		return errNotBuilt
+	}
+	return nil
 }
 
 // endpoint resolves path (no leading slash) against the base URL.
@@ -202,6 +222,9 @@ func (c *Client) endpoint(path string) string {
 // that does not decode wraps ErrUnexpectedResponse. Errors never carry the
 // token or the raw body.
 func (c *Client) call(ctx context.Context, method, path string, form url.Values, out any) error {
+	if err := c.ready(); err != nil {
+		return err
+	}
 	var body io.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())

@@ -54,15 +54,52 @@ func (s *looseString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// unquote strips the quotes of a JSON string and maps null to "0", so the
-// numeric types read "1.5", 1.5 and null alike.
+// unquote strips the quotes of a JSON string and maps null and "" to "0",
+// so the numeric types read "1.5", 1.5, null and "" alike.
 func unquote(b []byte) []byte {
 	b = bytes.TrimSpace(b)
-	if string(b) == "null" {
+	if string(b) == "null" || string(b) == `""` {
 		return []byte("0")
 	}
 	if len(b) >= 2 && b[0] == '"' && b[len(b)-1] == '"' {
 		return b[1 : len(b)-1]
 	}
 	return b
+}
+
+// The soft types are for optional fields: they never fail, and a value they
+// cannot read becomes the zero value.
+
+// softFloat decodes like looseFloat, or to 0.
+type softFloat float64
+
+func (f *softFloat) UnmarshalJSON(b []byte) error {
+	var v looseFloat
+	if v.UnmarshalJSON(b) == nil {
+		*f = softFloat(v)
+	}
+	return nil
+}
+
+// softInt decodes an integer, or a number with a fraction (truncated), or
+// a string holding either; anything else is 0.
+type softInt int64
+
+func (n *softInt) UnmarshalJSON(b []byte) error {
+	var v looseFloat
+	if v.UnmarshalJSON(b) == nil {
+		*n = softInt(v)
+	}
+	return nil
+}
+
+// softString decodes like looseString, or to "".
+type softString string
+
+func (s *softString) UnmarshalJSON(b []byte) error {
+	var v looseString
+	if v.UnmarshalJSON(b) == nil {
+		*s = softString(v)
+	}
+	return nil
 }

@@ -101,22 +101,26 @@ type Result struct {
 // Idx. Whether smsapi.bg applies check_idx to Test messages is not
 // documented.
 func (c *Client) Send(ctx context.Context, m Message) (Result, error) {
+	if err := c.ready(); err != nil {
+		return Result{}, err
+	}
 	form, err := m.form(c.now())
 	if err != nil {
 		return Result{}, err
 	}
+	// Only the ID is required; the other fields fail soft, so an odd value
+	// in one of them cannot turn a message that was sent into an error.
 	type item struct {
-		ID      looseString `json:"id"`
-		Points  looseFloat  `json:"points"`
-		Number  string      `json:"number"`
-		Date    looseInt    `json:"date_sent"`
-		Status  string      `json:"status"`
-		Parts   looseInt    `json:"parts"`
-		Message string      `json:"message"`
+		ID     looseString `json:"id"`
+		Points softFloat   `json:"points"`
+		Number softString  `json:"number"`
+		Date   softInt     `json:"date_sent"`
+		Status softString  `json:"status"`
+		Parts  softInt     `json:"parts"`
 	}
 	var body struct {
-		List  []item   `json:"list"`
-		Parts looseInt `json:"parts"`
+		List  []item  `json:"list"`
+		Parts softInt `json:"parts"`
 	}
 	if err := c.call(ctx, http.MethodPost, sendPath, form, &body); err != nil {
 		return Result{}, err
@@ -125,11 +129,14 @@ func (c *Client) Send(ctx context.Context, m Message) (Result, error) {
 		return Result{}, &unexpectedError{path: sendPath, reason: "no message in the answer"}
 	}
 	it := body.List[0]
+	if it.ID == "" {
+		return Result{}, &unexpectedError{path: sendPath, reason: "no message ID in the answer"}
+	}
 	res := Result{
 		ID:     string(it.ID),
 		Points: float64(it.Points),
-		Number: it.Number,
-		Status: it.Status,
+		Number: string(it.Number),
+		Status: string(it.Status),
 		Parts:  int(it.Parts),
 	}
 	if res.Parts == 0 {

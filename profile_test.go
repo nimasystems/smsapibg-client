@@ -1,9 +1,12 @@
 package smsapibg
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestProfileGetsTheBalanceWithTheBearerToken(t *testing.T) {
@@ -80,5 +83,50 @@ func TestProfileRefusesAMalformedBody(t *testing.T) {
 	})
 	if _, err := c.Profile(t.Context()); !errors.Is(err, ErrUnexpectedResponse) {
 		t.Fatalf("Profile error = %v, want ErrUnexpectedResponse", err)
+	}
+}
+
+func TestProfile200WithAnErrorBodyIsAnAPIError(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"error":101,"message":"Invalid authorization info"}`))
+	})
+	_, err := c.Profile(t.Context())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != CodeBadAuthorization || !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Profile error = %v, want an *APIError 101 that is ErrUnauthorized", err)
+	}
+}
+
+func TestProfileNon2xxWithoutAJSONBodyIsAnAPIErrorWithTheStatus(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("<html>down</html>"))
+	})
+	_, err := c.Profile(t.Context())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.HTTPStatus != http.StatusServiceUnavailable || apiErr.Code != 0 {
+		t.Fatalf("Profile error = %v, want an *APIError with HTTP 503 and no code", err)
+	}
+	if strings.Contains(err.Error(), "html") {
+		t.Errorf("the error echoes the body: %v", err)
+	}
+}
+
+func TestProfileStopsWhenTheContextIsCancelled(t *testing.T) {
+	arrived := make(chan struct{})
+	c := newHangingClient(t, arrived)
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() { <-arrived; cancel() }()
+	if _, err := c.Profile(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Profile error = %v, want context.Canceled", err)
+	}
+}
+
+func TestProfileTimesOutOnASlowServer(t *testing.T) {
+	c := newHangingClient(t, nil, WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
+	_, err := c.Profile(t.Context())
+	var timeout interface{ Timeout() bool }
+	if !errors.As(err, &timeout) || !timeout.Timeout() {
+		t.Fatalf("Profile error = %v, want a timeout", err)
 	}
 }

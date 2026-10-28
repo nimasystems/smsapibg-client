@@ -8,7 +8,8 @@ it covers that job well rather than the whole API. It is built to grow: each
 new endpoint is added the same way, with tests (see [Contributing](#contributing)).
 
 - Standard library only: no dependencies.
-- Go 1.26 or later.
+- Go 1.24 or later: the oldest release it needs (its tests use
+  `testing.T.Context`, new in 1.24). CI tests 1.24 and the latest stable Go.
 - Safe for concurrent use.
 - The API token never appears in errors, in `fmt` output with any verb, or
   in `log/slog`.
@@ -53,12 +54,13 @@ balance. Keep it in your secret store, not in code.
 ## Configuration
 
 `New(token, opts...)` returns a `*Client`. It refuses an empty token, a
-token with whitespace, and an invalid option.
+token with whitespace, and an invalid option. Always make a client with
+`New`: the methods of a zero `Client{}` return an error.
 
 | Option | Default | Notes |
 |---|---|---|
 | `WithBaseURL(url)` | `https://api.smsapi.bg/` | Must be `https`; plain `http` only on a loopback host, for tests. Must not carry `user:password@`. A path prefix is kept (for a proxy). |
-| `WithHTTPClient(hc)` | a private `*http.Client` with a 15 s timeout (`DefaultTimeout`) and TLS 1.2 or later | Used as given. If its `Timeout` is zero, only your context bounds a call. |
+| `WithHTTPClient(hc)` | a private `*http.Client` with a 15 s timeout (`DefaultTimeout`), TLS 1.2 or later, and no redirects (a 3xx comes back as an `*APIError`; following it would replay the POST) | Used as given. If its `Timeout` is zero, only your context bounds a call. |
 | `WithUserAgent(ua)` | `smsapibg-client-go` (`DefaultUserAgent`) | Name your application so smsapi.bg can tell its traffic apart. |
 
 Every call takes a `context.Context`; cancel it or give it a deadline to
@@ -200,6 +202,11 @@ http.HandleFunc("/sms/dlr/{secret}", func(w http.ResponseWriter, r *http.Request
   (`DELIVERED`, `UNDELIVERED`, `EXPIRED`, `FAILED`, `REJECTED`, `UNKNOWN`,
   `NOT_FOUND`, `STOP`), and `Delivered()` only for `DELIVERED`. A code this
   library does not know is kept as a number and is not final.
+- `SENT` (403, "sent without a final delivery report") is deliberately not
+  final: where the network reports delivery, `DELIVERED` or `UNDELIVERED`
+  follows it, and a final `SENT` would hide that. Where the network does not,
+  nothing follows, so never wait on `Final()` alone: stop after a deadline of
+  your own and treat a last `SENT` as probably delivered.
 - The report fields read are `MsgId`, `status`, `status_name`, `to`, `idx`
   and `donedate`. The rest (`sent_at`, `points`, `username`, `mcc`, `mnc`,
   `from`) are left in the query for you.
@@ -254,8 +261,9 @@ Issues and pull requests are welcome. The rules for a change are in
 [CLAUDE.md](CLAUDE.md) (they bind people and coding agents alike): test
 first, standard library only, no secrets or personal data in errors or
 logs, and keep the coverage table above true. Run `make check` before you
-push: it is what CI runs (gofmt, `go vet`, staticcheck, `go test -race` and a
-90% coverage floor).
+push: it is what CI runs (gofmt, `go vet`, staticcheck, govulncheck,
+`go test -race` and a 90% coverage floor). Dependabot proposes updates to the
+pinned GitHub Actions weekly.
 
 ## License
 
