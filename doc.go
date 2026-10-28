@@ -19,9 +19,11 @@
 //
 // Errors from the API are [*APIError] values. Callers branch on a class with
 // errors.Is ([ErrInsufficientCredits], [ErrUnauthorized], [ErrInvalidNumber],
-// [ErrRateLimited], [ErrBlocked], [ErrTemporary]) or on the exact code with
-// errors.As. A message refused before any request is made is a
-// [*ValidationError].
+// [ErrRateLimited], [ErrBlocked], [ErrTemporary], [ErrDuplicateIdx]) or on the
+// exact code with errors.As. [ErrOutcomeUnknown] marks a failure after which
+// a message may or may not have been sent: retry [Client.Send] only with
+// Message.Idx and Message.CheckIdx set. A message refused before any request
+// is made is a [*ValidationError].
 //
 // The package uses the standard library only.
 package smsapibg
