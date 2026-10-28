@@ -49,6 +49,8 @@ func ExampleClient_Send() {
 		NoUnicode: true,
 	})
 	switch {
+	case errors.Is(err, smsapibg.ErrDuplicateIdx):
+		fmt.Println("already sent by an earlier attempt: treat as sent")
 	case errors.Is(err, smsapibg.ErrInvalidNumber):
 		fmt.Println("ask the user for another number")
 	case errors.Is(err, smsapibg.ErrTemporary):

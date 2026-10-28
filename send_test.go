@@ -288,6 +288,21 @@ func TestASendDecodesTheInvalidNumbers(t *testing.T) {
 	}
 }
 
+func TestARetryRefusedAsADuplicateIdxIsAlreadySentNotAnInvalidNumber(t *testing.T) {
+	var got capture
+	body := `{"invalid_numbers":[{"number":"359888123456","submitted_number":"359888123456","message":"Not unique idx"}],` +
+		`"error":53,"message":"Not unique idx parameter, message with the same idx has been already sent and &check_idx=1."}`
+	c := newTestClient(t, serve(t, &got, http.StatusOK, body))
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "hi", Idx: "verify-42", CheckIdx: true})
+	if !errors.Is(err, ErrDuplicateIdx) {
+		t.Fatalf("Send error = %v, want ErrDuplicateIdx", err)
+	}
+	if errors.Is(err, ErrInvalidNumber) {
+		t.Error("a duplicate idx is reported as an invalid number")
+	}
+}
+
 func TestASendNon2xxWithAJSONErrorIsAnAPIError(t *testing.T) {
 	var got capture
 	c := newTestClient(t, serve(t, &got, http.StatusTooManyRequests, `{"error":203,"message":"Too many requests. Please try again later."}`))

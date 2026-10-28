@@ -58,7 +58,8 @@ var (
 	// 401, an "authorization_failed" error, or HTTP 401).
 	ErrUnauthorized = errors.New("smsapibg: unauthorized")
 	// ErrInvalidNumber means the recipient number was refused, by smsapi.bg
-	// (13, or a list of invalid numbers) or locally before sending.
+	// (13, or a list of invalid numbers without another code) or locally
+	// before sending.
 	ErrInvalidNumber = errors.New("smsapibg: invalid number")
 	// ErrRateLimited means too many requests, overall (202, 203, HTTP 429)
 	// or to one number (52).
@@ -69,6 +70,10 @@ var (
 	// ErrTemporary means a later retry may succeed (8, 200, 201, 202, 203,
 	// 999, or an HTTP 429 or 5xx without a code). See [APIError.Temporary].
 	ErrTemporary = errors.New("smsapibg: temporary failure")
+	// ErrDuplicateIdx means a message with this Idx was already accepted in
+	// the last 24 h (53, with CheckIdx): treat it as sent. On a retry it is
+	// the answer that proves the first attempt went through.
+	ErrDuplicateIdx = errors.New("smsapibg: duplicate idx")
 
 	// ErrUnexpectedResponse means a successful HTTP answer that this
 	// library could not read. On Send the message may have been accepted.
@@ -133,7 +138,12 @@ func (e *APIError) Is(target error) bool {
 		}
 		return e.Name == "authorization_failed" || (e.Code == 0 && e.HTTPStatus == http.StatusUnauthorized)
 	case ErrInvalidNumber:
-		return e.Code == CodeNoValidNumbers || len(e.InvalidNumbers) > 0
+		// A list of numbers also comes with other codes (53 lists the
+		// duplicate, 57 the blacklisted); only 13, or a list with no code,
+		// means the number itself is bad.
+		return e.Code == CodeNoValidNumbers || (e.Code == 0 && len(e.InvalidNumbers) > 0)
+	case ErrDuplicateIdx:
+		return e.Code == CodeDuplicateIdx
 	case ErrRateLimited:
 		switch e.Code {
 		case CodeTooManyAttemptsToNumber, CodeTooManySimultaneous, CodeTooManyRequests:

@@ -113,7 +113,8 @@ transport errors, with backoff. Do not retry `ErrRateLimited` for code 52
 | `*APIError` | smsapi.bg refused the request. Holds `Code`, `Name` (a string ID some endpoints use, such as `authorization_failed`), `Message`, `InvalidNumbers` and `HTTPStatus`. It is returned whether the error came with HTTP 200 or another status. | `errors.As(err, &apiErr)` |
 | `ErrInsufficientCredits` | Out of points (103). | `errors.Is` |
 | `ErrUnauthorized` | Bad token or missing scope (101, 102, 401, `authorization_failed`, HTTP 401). | `errors.Is` |
-| `ErrInvalidNumber` | The number was refused, by smsapi.bg (13, or a list of invalid numbers) or locally (`ValidationError` on `to`). | `errors.Is` |
+| `ErrInvalidNumber` | The number was refused, by smsapi.bg (13, or a list of invalid numbers without another code) or locally (`ValidationError` on `to`). Another code that comes with a list of numbers (53, 57, ...) is not this. | `errors.Is` |
+| `ErrDuplicateIdx` | A message with this `Idx` was already accepted in the last 24 h (53, with `CheckIdx`): treat it as sent. | `errors.Is` |
 | `ErrRateLimited` | Too many requests overall (202, 203, HTTP 429) or to one number (52). | `errors.Is` |
 | `ErrBlocked` | The recipient is blacklisted (57) or opted out (59). Do not retry. | `errors.Is` |
 | `ErrTemporary` | A retry may succeed (8, 200, 201, 202, 203, 999, or HTTP 429 or 5xx without a code). Same as `apiErr.Temporary()`. | `errors.Is` |

@@ -16,6 +16,7 @@ func TestAnAPIErrorMatchesTheClassesItsCodeBelongsTo(t *testing.T) {
 		"ErrRateLimited":         ErrRateLimited,
 		"ErrBlocked":             ErrBlocked,
 		"ErrTemporary":           ErrTemporary,
+		"ErrDuplicateIdx":        ErrDuplicateIdx,
 	}
 	cases := []struct {
 		code int
@@ -26,7 +27,7 @@ func TestAnAPIErrorMatchesTheClassesItsCodeBelongsTo(t *testing.T) {
 		{CodeNoValidNumbers, []string{"ErrInvalidNumber"}},
 		{CodeWrongSenderName, nil},
 		{CodeTooManyAttemptsToNumber, []string{"ErrRateLimited"}},
-		{CodeDuplicateIdx, nil},
+		{CodeDuplicateIdx, []string{"ErrDuplicateIdx"}},
 		{CodeBlacklisted, []string{"ErrBlocked"}},
 		{CodeOptedOut, []string{"ErrBlocked"}},
 		{CodeBadAuthorization, []string{"ErrUnauthorized"}},
@@ -57,10 +58,19 @@ func TestAnAPIErrorMatchesTheClassesItsCodeBelongsTo(t *testing.T) {
 	}
 }
 
-func TestAnAPIErrorWithInvalidNumbersIsAnInvalidNumberError(t *testing.T) {
-	err := &APIError{Code: CodeRequestError, InvalidNumbers: []InvalidNumber{{Number: "1", Message: "Invalid phone number"}}}
+func TestAnAPIErrorWithInvalidNumbersButNoCodeIsAnInvalidNumberError(t *testing.T) {
+	err := &APIError{InvalidNumbers: []InvalidNumber{{Number: "1", Message: "Invalid phone number"}}}
 	if !errors.Is(err, ErrInvalidNumber) {
-		t.Error("an error that lists invalid numbers is not ErrInvalidNumber")
+		t.Error("an error that lists invalid numbers and has no code is not ErrInvalidNumber")
+	}
+}
+
+func TestAListOfNumbersDoesNotMakeAnotherCodeAnInvalidNumber(t *testing.T) {
+	list := []InvalidNumber{{Number: "359888123456", Message: "Not unique idx"}}
+	for _, code := range []int{CodeDuplicateIdx, CodeBlacklisted, CodeOptedOut, CodeTooManyAttemptsToNumber, CodeRequestError} {
+		if errors.Is(&APIError{Code: code, InvalidNumbers: list}, ErrInvalidNumber) {
+			t.Errorf("code %d with a list of numbers is ErrInvalidNumber", code)
+		}
 	}
 }
 
