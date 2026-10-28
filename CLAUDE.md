@@ -39,10 +39,15 @@ library does; this file says how to change it.
 
 ## Security and personal data
 
-- Never log, print or put in an error the API token. It lives in the
-  unexported `secret` type, and `Client` has no exported token field. Keep it
-  that way. Only `call` reveals the token, for the `Authorization` header.
-  It never goes in a URL or a query string.
+- Never log, print or put in an error the API token. It lives behind an
+  unexported pointer (`token *secret`): `fmt` prints a nested pointer as an
+  address, so even a verb `String` does not serve (`%d`, `%p` of a `Client`
+  value) cannot reach it. `secret` and `Client` also redact through `Format`,
+  `String`, `GoString`, `LogValue` and `MarshalText`.
+  `TestTheClientNeverPrintsItsTokenWithAnyVerb` checks every verb; extend it
+  when you add a field. `Client` has no exported token field. Keep it that
+  way. Only `call` reveals the token, for the `Authorization` header. It
+  never goes in a URL or a query string.
 - Errors never echo phone numbers, message text, sender names, URLs with
   credentials or raw response bodies. Name the parameter and the rule
   instead (`ValidationError{Field, Reason}`).

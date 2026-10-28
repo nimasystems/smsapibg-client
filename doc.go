@@ -10,8 +10,9 @@
 // management, short links, HLR) is not covered yet; the README keeps the
 // list.
 //
-// A [Client] is safe for concurrent use. It holds the API token privately
-// and never prints it: not in errors, not through fmt, not through log/slog.
+// A [Client] is safe for concurrent use. It holds the API token behind an
+// unexported pointer and never prints it: not in errors, not through fmt
+// with any verb (%p and %d included), not through log/slog or encoding/json.
 // It sends the token only in the Authorization header, and only over HTTPS
 // (plain HTTP is allowed for a loopback base URL so tests can use
 // net/http/httptest).

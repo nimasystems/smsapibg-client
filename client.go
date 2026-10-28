@@ -38,7 +38,7 @@ const (
 // Client talks to the smsapi.bg API with one token. It is safe for
 // concurrent use and holds no mutable state after [New] returns.
 type Client struct {
-	token     secret
+	token     *secret // a pointer: fmt prints a nested pointer as an address, never its target
 	baseURL   *url.URL
 	http      *http.Client
 	userAgent string
@@ -67,7 +67,7 @@ func New(token string, opts ...Option) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{
-		token:     secret(token),
+		token:     &secret{value: token},
 		baseURL:   base,
 		http:      defaultHTTPClient(),
 		userAgent: DefaultUserAgent,
@@ -132,20 +132,27 @@ func (c Client) String() string {
 // GoString keeps the token out of %#v.
 func (c Client) GoString() string { return c.String() }
 
+// Format prints String for every verb, so a verb String does not serve
+// (%d, %t, %9.3f, ...) cannot make fmt walk the fields. %p of a Client
+// value still walks them, which is why the token is behind a pointer.
+func (c Client) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, c.String()) }
+
 // LogValue keeps the token out of log/slog.
 func (c Client) LogValue() slog.Value { return slog.StringValue(c.String()) }
 
-// secret is a string that refuses to print or encode itself. Only reveal
-// returns the value, and only call uses it, for the Authorization header.
-type secret string
+// secret holds the token and refuses to print or encode it, with any verb.
+// Only reveal returns the value, and only call uses it, for the
+// Authorization header.
+type secret struct{ value string }
 
 const redacted = "[redacted]"
 
-func (secret) String() string               { return redacted }
-func (secret) GoString() string             { return redacted }
-func (secret) LogValue() slog.Value         { return slog.StringValue(redacted) }
-func (secret) MarshalText() ([]byte, error) { return []byte(redacted), nil }
-func (s secret) reveal() string             { return string(s) }
+func (*secret) String() string               { return redacted }
+func (*secret) GoString() string             { return redacted }
+func (*secret) Format(f fmt.State, _ rune)   { _, _ = io.WriteString(f, redacted) }
+func (*secret) LogValue() slog.Value         { return slog.StringValue(redacted) }
+func (*secret) MarshalText() ([]byte, error) { return []byte(redacted), nil }
+func (s *secret) reveal() string             { return s.value }
 
 func parseBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)

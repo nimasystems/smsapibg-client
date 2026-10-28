@@ -169,23 +169,29 @@ func TestTheDefaultHTTPClientHasATimeoutAndRequiresTLS12(t *testing.T) {
 	}
 }
 
-func TestTheClientNeverPrintsItsToken(t *testing.T) {
+func TestTheClientNeverPrintsItsTokenWithAnyVerb(t *testing.T) {
 	c, err := New(testToken)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q"} {
-		for _, v := range []any{c, *c, c.token} {
-			if out := fmt.Sprintf(verb, v); strings.Contains(out, testToken) {
-				t.Errorf("fmt %s of %T prints the token: %s", verb, v, out)
+	// The first 3 characters catch a precision verb such as %9.3f, which
+	// prints only part of a string.
+	needle := testToken[:3]
+	verbs := []string{"%d", "%t", "%U", "%9.3f", "%p", "%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%T", "%e", "%c", "%o", "%b"}
+	for _, verb := range verbs {
+		for name, v := range map[string]any{"*Client": c, "Client": *c, "token": c.token} {
+			if out := fmt.Sprintf(verb, v); strings.Contains(out, needle) {
+				t.Errorf("fmt %s of %s prints the token: %s", verb, name, out)
 			}
 		}
 	}
-	var buf bytes.Buffer
-	log := slog.New(slog.NewJSONHandler(&buf, nil))
-	log.Info("client", "client", c, "value", *c, "token", c.token)
-	if strings.Contains(buf.String(), testToken) {
-		t.Errorf("slog prints the token: %s", buf.String())
+	for name, v := range map[string]any{"*Client": c, "Client": *c, "token": c.token} {
+		var text, js bytes.Buffer
+		slog.New(slog.NewTextHandler(&text, nil)).Info("client", "v", v)
+		slog.New(slog.NewJSONHandler(&js, nil)).Info("client", "v", v)
+		if strings.Contains(text.String(), needle) || strings.Contains(js.String(), needle) {
+			t.Errorf("slog of %s prints the token: %s %s", name, text.String(), js.String())
+		}
 	}
 }
 

@@ -10,7 +10,8 @@ new endpoint is added the same way, with tests (see [Contributing](#contributing
 - Standard library only: no dependencies.
 - Go 1.26 or later.
 - Safe for concurrent use.
-- The API token never appears in errors, `fmt` output or `log/slog`.
+- The API token never appears in errors, in `fmt` output with any verb, or
+  in `log/slog`.
 
 > **Not affiliated with smsapi.bg.** This is an independent, open-source
 > client. "smsapi.bg" is named only to say which API it talks to.
