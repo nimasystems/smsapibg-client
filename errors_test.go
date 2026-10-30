@@ -199,3 +199,66 @@ func TestTheOutcomeIsUnknownOnlyWhenSmsapiMayHaveAcceptedTheMessage(t *testing.T
 		}
 	}
 }
+
+func TestAnAPIErrorKeepsItsBodyAndNeverPrintsIt(t *testing.T) {
+	const body = `{"error":13,"message":"No correct phone numbers","invalid_numbers":[{"number":"359888123456"}]}`
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusOK, body))
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "Your code is 123456"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want an *APIError", err)
+	}
+	if string(apiErr.Raw) != body {
+		t.Errorf("Raw = %q, want the body byte for byte", apiErr.Raw)
+	}
+	for _, leak := range []string{"359888123456", "invalid_numbers"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("Error() = %q, want it without %q", err.Error(), leak)
+		}
+	}
+}
+
+func TestAnAPIErrorWithoutABodyHasNoRaw(t *testing.T) {
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusBadGateway, ""))
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "Your code is 123456"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want an *APIError", err)
+	}
+	if apiErr.Raw != nil {
+		t.Errorf("Raw = %q, want nil when there was no body", apiErr.Raw)
+	}
+}
+
+func TestAnAPIErrorFromAJSONBodyWithoutAnErrorFieldKeepsItToo(t *testing.T) {
+	const body = `{"detail":"upstream down"}`
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusBadGateway, body))
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "Your code is 123456"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want an *APIError", err)
+	}
+	if string(apiErr.Raw) != body {
+		t.Errorf("Raw = %q, want the body", apiErr.Raw)
+	}
+}
+
+func TestAnAPIErrorFromABodyThatIsNotJSONLeavesRawNil(t *testing.T) {
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusBadGateway, "<html>bad gateway</html>"))
+
+	_, err := c.Send(t.Context(), Message{To: "359888123456", Text: "Your code is 123456"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want an *APIError", err)
+	}
+	if apiErr.Raw != nil {
+		t.Errorf("Raw = %q, want nil: it would not marshal as JSON", apiErr.Raw)
+	}
+}

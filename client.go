@@ -225,13 +225,14 @@ func (c *Client) endpoint(path string) string {
 	return c.baseURL.JoinPath(path).String()
 }
 
-// call makes one request and decodes a successful JSON answer into out. An
-// error body is an *APIError whether it comes with a 2xx or not; a 2xx body
-// that does not decode wraps ErrUnexpectedResponse. Errors never carry the
-// token or the raw body.
-func (c *Client) call(ctx context.Context, method, path string, form url.Values, out any) error {
+// call makes one request and decodes a successful JSON answer into out,
+// returning that answer exactly as read (a copy the caller owns). An error
+// body is an *APIError whether it comes with a 2xx or not; a 2xx body that
+// does not decode wraps ErrUnexpectedResponse. The error's text never carries
+// the token or the raw body; only [APIError.Raw] holds the body.
+func (c *Client) call(ctx context.Context, method, path string, form url.Values, out any) (json.RawMessage, error) {
 	if err := c.ready(); err != nil {
-		return err
+		return nil, err
 	}
 	var body io.Reader
 	if form != nil {
@@ -239,7 +240,7 @@ func (c *Client) call(ctx context.Context, method, path string, form url.Values,
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(path), body)
 	if err != nil {
-		return fmt.Errorf("smsapibg: build %s request: %w", path, err)
+		return nil, fmt.Errorf("smsapibg: build %s request: %w", path, err)
 	}
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -250,7 +251,7 @@ func (c *Client) call(ctx context.Context, method, path string, form url.Values,
 
 	// A context already done means the request never leaves.
 	if err := ctx.Err(); err != nil {
-		return &transportError{op: path + " request not sent", err: err}
+		return nil, &transportError{op: path + " request not sent", err: err}
 	}
 	// wrote turns true once the request headers are on the wire. It is only
 	// ever a signal toward "unknown": a transport that drops the request
@@ -263,25 +264,30 @@ func (c *Client) call(ctx context.Context, method, path string, form url.Values,
 	resp, err := c.http.Do(req)
 	if err != nil {
 		sent := wrote.Load() || !clearlyNotSent(err)
-		return &transportError{op: path + " request failed", err: err, sent: sent}
+		return nil, &transportError{op: path + " request failed", err: err, sent: sent}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
-		return &transportError{op: "read " + path + " response", err: err, sent: true}
+		return nil, &transportError{op: "read " + path + " response", err: err, sent: true}
 	}
 
 	if apiErr := decodeAPIError(raw, resp.StatusCode); apiErr != nil {
-		return apiErr
+		return nil, apiErr
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return &APIError{HTTPStatus: resp.StatusCode, Message: http.StatusText(resp.StatusCode)}
+		// Keep the body only when it is JSON, so Raw always marshals.
+		var kept json.RawMessage
+		if json.Valid(raw) {
+			kept = bytes.Clone(raw)
+		}
+		return nil, &APIError{HTTPStatus: resp.StatusCode, Message: http.StatusText(resp.StatusCode), Raw: kept}
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := dec.Decode(out); err != nil {
-		return &unexpectedError{path: path, reason: describeDecodeError(err)}
+		return nil, &unexpectedError{path: path, reason: describeDecodeError(err)}
 	}
-	return nil
+	return bytes.Clone(raw), nil
 }
 
 // transportError is a request that got no HTTP answer. It unwraps to the
@@ -366,6 +372,9 @@ func decodeAPIError(raw []byte, status int) *APIError {
 		return nil
 	}
 	e := &APIError{Message: probe.Message, InvalidNumbers: probe.InvalidNumbers, HTTPStatus: status}
+	if len(raw) > 0 {
+		e.Raw = bytes.Clone(raw)
+	}
 	var n looseInt
 	var s string
 	switch {

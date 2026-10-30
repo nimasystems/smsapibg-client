@@ -96,7 +96,10 @@ parameter allows 15 minutes to 72 hours, while the text of error 56 says
 
 `Result` holds `ID` (the message ID that delivery reports carry), `Points`
 (the cost), `Number` (as smsapi.bg normalised it), `Status` (usually
-`QUEUE`), `Parts` (with `Details`) and `SentAt`.
+`QUEUE`), `Parts` (with `Details`), `SentAt` and `Raw`, smsapi.bg's answer
+exactly as received (a copy), for a caller that keeps it to diagnose a delivery
+later. `Raw` holds the recipient's number: it is personal data, so do not log it
+as it is.
 
 ### Retries without double sends
 
@@ -136,7 +139,7 @@ only makes it worse.
 
 | Error | What it means | How to test |
 |---|---|---|
-| `*APIError` | smsapi.bg refused the request. Holds `Code`, `Name` (a string ID some endpoints use, such as `authorization_failed`), `Message`, `InvalidNumbers` and `HTTPStatus`. It is returned whether the error came with HTTP 200 or another status. | `errors.As(err, &apiErr)` |
+| `*APIError` | smsapi.bg refused the request. Holds `Code`, `Name` (a string ID some endpoints use, such as `authorization_failed`), `Message`, `InvalidNumbers`, `HTTPStatus` and `Raw` (the error body as received; nil when there was none or a non-2xx body was not JSON). It is returned whether the error came with HTTP 200 or another status. | `errors.As(err, &apiErr)` |
 | `ErrInsufficientCredits` | Out of points (103). | `errors.Is` |
 | `ErrUnauthorized` | Bad token or missing scope (101, 102, 401, `authorization_failed`, HTTP 401). | `errors.Is` |
 | `ErrInvalidNumber` | The number was refused, by smsapi.bg (13, or a list of invalid numbers without another code) or locally (`ValidationError` on `to`). Another code that comes with a list of numbers (53, 57, ...) is not this. | `errors.Is` |
@@ -157,8 +160,8 @@ wrapped: `errors.Is(err, context.Canceled)` and
 `errors.Is(err, context.DeadlineExceeded)` work.
 
 Error messages leave out the token, phone numbers and message text, so they
-are safe to log. `APIError.InvalidNumbers` and `Profile` hold personal data:
-do not log those as they are.
+are safe to log. `APIError.InvalidNumbers`, `APIError.Raw`, `Result.Raw` and
+`Profile` hold personal data: do not log those as they are.
 
 ## Balance
 

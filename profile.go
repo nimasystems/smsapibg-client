@@ -31,7 +31,7 @@ func (c *Client) Profile(ctx context.Context) (Profile, error) {
 		PaymentType string     `json:"payment_type"`
 		UserType    string     `json:"user_type"`
 	}
-	if err := c.call(ctx, http.MethodGet, "profile", nil, &body); err != nil {
+	if _, err := c.call(ctx, http.MethodGet, "profile", nil, &body); err != nil {
 		return Profile{}, err
 	}
 	return Profile{
