@@ -1,6 +1,7 @@
 package smsapibg
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -110,6 +111,11 @@ type APIError struct {
 	InvalidNumbers []InvalidNumber
 	// HTTPStatus is the status of the response that carried the error.
 	HTTPStatus int
+	// Raw is the error body exactly as received, for a caller that keeps it
+	// to diagnose a failure. It is nil when there was no body, or when a
+	// non-2xx body was not JSON. It is personal data (it can list the
+	// refused numbers): do not log it as it is. Error never includes it.
+	Raw json.RawMessage
 }
 
 // InvalidNumber is one refused recipient in an [APIError].

@@ -2,6 +2,7 @@ package smsapibg
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -85,6 +86,11 @@ type Result struct {
 	Parts int
 	// SentAt is when smsapi.bg accepted the message; zero if not given.
 	SentAt time.Time
+	// Raw is smsapi.bg's answer exactly as received, for a caller that
+	// keeps it to diagnose a delivery later. It is personal data (the
+	// recipient's number): do not log it as it is. It is a copy the caller
+	// owns.
+	Raw json.RawMessage
 }
 
 // Send sends m (POST /sms.do). It checks m first and returns a
@@ -122,7 +128,8 @@ func (c *Client) Send(ctx context.Context, m Message) (Result, error) {
 		List  []item  `json:"list"`
 		Parts softInt `json:"parts"`
 	}
-	if err := c.call(ctx, http.MethodPost, sendPath, form, &body); err != nil {
+	raw, err := c.call(ctx, http.MethodPost, sendPath, form, &body)
+	if err != nil {
 		return Result{}, err
 	}
 	if len(body.List) == 0 {
@@ -138,6 +145,7 @@ func (c *Client) Send(ctx context.Context, m Message) (Result, error) {
 		Number: string(it.Number),
 		Status: string(it.Status),
 		Parts:  int(it.Parts),
+		Raw:    raw,
 	}
 	if res.Parts == 0 {
 		res.Parts = int(body.Parts)

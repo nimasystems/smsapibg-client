@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -211,7 +212,11 @@ func TestASendReturnsTheQueuedResult(t *testing.T) {
 		Status: "QUEUE",
 		SentAt: time.Unix(1460969712, 0),
 	}
-	if res != want {
+	if string(res.Raw) != queuedBody {
+		t.Errorf("Raw = %q, want the body", res.Raw)
+	}
+	want.Raw = res.Raw // a Result with a Raw is not comparable with ==
+	if !reflect.DeepEqual(res, want) {
 		t.Errorf("Result = %+v\nwant     %+v", res, want)
 	}
 }
@@ -648,7 +653,8 @@ func TestOddOptionalFieldsDoNotTurnASentMessageIntoAnError(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	want := Result{ID: "1", Number: "359888123456", SentAt: time.Unix(1460969712, 0)}
-	if res != want {
+	want.Raw = res.Raw // a Result with a Raw is not comparable with ==
+	if !reflect.DeepEqual(res, want) {
 		t.Errorf("Result = %+v\nwant     %+v", res, want)
 	}
 }
@@ -707,5 +713,19 @@ func TestTheDefaultClientDoesNotFollowRedirects(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.HTTPStatus != http.StatusTemporaryRedirect {
 		t.Errorf("Send error = %v, want an *APIError with HTTP 307", err)
+	}
+}
+
+func TestASendKeepsTheAnswerAsReceived(t *testing.T) {
+	const body = `{"count":1,"list":[{"id":"m1","points":0.05,"number":"359888123456","date_sent":1730000000,"status":"QUEUE"}]}`
+	var got capture
+	c := newTestClient(t, serve(t, &got, http.StatusOK, body))
+
+	res, err := c.Send(t.Context(), Message{To: "359888123456", Text: "Your code is 123456"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if string(res.Raw) != body {
+		t.Errorf("Raw = %q, want the body byte for byte", res.Raw)
 	}
 }
